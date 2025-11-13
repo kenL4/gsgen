@@ -123,11 +123,14 @@ def get_density_val_grid_from_ckpt(
 def to_mesh(
     ckpt_path, save_dir, device="cuda", reso=128, K=3, batch_size=256, thresh=0.5
 ):
+    import mcubes
     torch.set_default_device(device)
+    
     ckpt_path = get_ckpt_path(ckpt_path)
     if ckpt_path is None:
         console.print(f"[red]ckpt not found: {ckpt_path}[/red]")
         return
+
     ckpt = torch.load(ckpt_path, map_location=device)
     cfg = ckpt["cfg"]
     prompt = cfg["prompt"]["prompt"].replace(" ", "_")
@@ -135,24 +138,32 @@ def to_mesh(
     if "params" in ckpt:
         ckpt = ckpt["params"]
 
+    # Generate 3D density grid
     density_val_grid, L = get_density_val_grid_from_ckpt(
         ckpt,
         reso=reso,
         K=K,
         batch_size=batch_size,
     )
+    
     density_val_grid = density_val_grid.cpu().numpy()
-    print(np.min(density_val_grid))
-    print(np.max(density_val_grid))
-    # TODO: finish this
-    import mcubes
+    print(f"Density grid min: {np.min(density_val_grid)}")
+    print(f"Density grid max: {np.max(density_val_grid)}")
 
+    # Ensure save directory exists
     save_dir = Path(save_dir) / "obj"
-    if not save_dir.exists():
-        save_dir.mkdir(parents=True, exist_ok=True)
+    save_dir.mkdir(parents=True, exist_ok=True)
 
-    vertices, triangles = marching_cubes(density_val_grid, L, reso, thresh)
+    # Extract mesh
+    vertices, triangles = mcubes.marching_cubes(density_val_grid, thresh)
+
+    # Optionally scale vertices if L is used for normalization
+    if L is not None:
+        vertices = vertices * (2 * L / reso) - L  # scale to [-L, L]
+
+    # Save as OBJ
     mcubes.export_obj(vertices, triangles, str(save_dir / f"{prompt}.obj"))
+    print(f"Mesh saved to {save_dir / f'{prompt}.obj'}")
 
 
 def to_ply(ckpt_path, save_dir):
